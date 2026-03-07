@@ -4,6 +4,12 @@ on:
   push:
     branches: [ main ]
 
+env:
+  ACR_NAME: democicdregistry
+  RG_NAME: demo-cicd-rg
+  AKS_NAME: demo-aks-cluster
+  IMAGE_NAME: demoapp
+
 jobs:
 
   build-test:
@@ -26,6 +32,7 @@ jobs:
     - name: Run Tests
       run: |
         pytest
+
 
   terraform-deploy:
 
@@ -66,6 +73,7 @@ jobs:
         cd terraform
         terraform apply -auto-approve
 
+
   docker-build:
 
     runs-on: ubuntu-latest
@@ -76,11 +84,68 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: |
+          {
+            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+          }
+
+    # Login to ACR
+    - name: Login to ACR
+      run: |
+        az acr login --name $ACR_NAME
+
+    # Build Docker Image
     - name: Build Docker Image
       run: |
-        docker build -t demoapp:latest .
+        docker build -t $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }} .
 
-    - name: Push Image to ACR
+    # Security Scan
+    - name: Scan Image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        format: table
+        exit-code: 0
+
+    # Push Image to ACR
+    - name: Push Image
       run: |
-        echo "Login to Azure Container Registry"
-        # login commands here
+        docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}
+
+
+  deploy-aks:
+
+    runs-on: ubuntu-latest
+    needs: docker-build
+
+    steps:
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: |
+          {
+            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+          }
+
+    # Connect to AKS
+    - name: Get AKS Credentials
+      run: |
+        az aks get-credentials \
+        --resource-group $RG_NAME \
+        --name $AKS_NAME \
+        --overwrite-existing
+
+    # Deploy Kubernetes workload
+    - name: Deploy to AKS
+      run: |
+        kubectl apply -f k8s/deployment.yaml
