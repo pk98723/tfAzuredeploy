@@ -31,6 +31,11 @@ resource "azurerm_log_analytics_workspace" "log" {
 # AKS Cluster
 #################################
 
+resource "tls_private_key" "ssh_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
 resource "azurerm_kubernetes_cluster" "aks" {
   name                = "demo-aks-cluster"
   location            = azurerm_resource_group.rg.location
@@ -51,7 +56,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
     admin_username = "azureuser"
 
     ssh_key {
-      key_data = file("~/.ssh/id_rsa.pub")
+      key_data = tls_private_key.ssh_key.public_key_openssh
     }
   }
 
