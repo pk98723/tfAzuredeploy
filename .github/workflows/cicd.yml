@@ -63,6 +63,12 @@ jobs:
         cd terraform
         terraform init
 
+    - name: Import Resource Group if Exists
+      run: |
+        cd terraform
+        terraform import azurerm_resource_group.rg \
+        /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg || true
+
     - name: Terraform Plan
       run: |
         cd terraform
