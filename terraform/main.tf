@@ -15,9 +15,9 @@ resource "azurerm_container_registry" "acr" {
   admin_enabled       = true
 }
 
-#################################
+
 # Log Analytics (AKS Monitoring)
-#################################
+
 
 resource "azurerm_log_analytics_workspace" "log" {
   name                = "demo-aks-logs"
