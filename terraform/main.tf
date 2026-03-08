@@ -26,7 +26,6 @@ data "azurerm_resource_group" "existing" {
 }
 
 resource "azurerm_resource_group" "rg" {
-  count    = length(data.azurerm_resource_group.existing.*.id) == 0 ? 1 : 0
   name     = "demo-cicd-rg"
   location = "East US"
 
@@ -72,10 +71,6 @@ resource "azurerm_log_analytics_workspace" "log" {
 ##########################################################
 # AKS Cluster
 ##########################################################
-data "azurerm_kubernetes_cluster" "existing" {
-  name                = "demo-aks-cluster"
-  resource_group_name = "demo-cicd-rg"
-}
 
 resource "tls_private_key" "ssh_key" {
   algorithm = "RSA"
