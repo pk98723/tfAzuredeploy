@@ -11,6 +11,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~>3.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~>4.0"
+    }
   }
 }
 
@@ -21,9 +25,6 @@ provider "azurerm" {
 ##########################################################
 # Resource Group
 ##########################################################
-data "azurerm_resource_group" "existing" {
-  name = "demo-cicd-rg"
-}
 
 resource "azurerm_resource_group" "rg" {
   name     = "demo-cicd-rg"
@@ -37,16 +38,11 @@ resource "azurerm_resource_group" "rg" {
 ##########################################################
 # Container Registry (ACR)
 ##########################################################
-data "azurerm_container_registry" "existing" {
-  name                = "democicdregistry"
-  resource_group_name = "demo-cicd-rg"
-}
 
 resource "azurerm_container_registry" "acr" {
-  count               = length(data.azurerm_container_registry.existing.*.id) == 0 ? 1 : 0
   name                = "democicdregistry"
-  resource_group_name = coalesce(azurerm_resource_group.rg[0].name, "demo-cicd-rg")
-  location            = coalesce(azurerm_resource_group.rg[0].location, "East US")
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
   sku                 = "Basic"
   admin_enabled       = true
 }
@@ -54,22 +50,17 @@ resource "azurerm_container_registry" "acr" {
 ##########################################################
 # Log Analytics Workspace
 ##########################################################
-data "azurerm_log_analytics_workspace" "existing" {
-  name                = "demo-aks-logs"
-  resource_group_name = "demo-cicd-rg"
-}
 
 resource "azurerm_log_analytics_workspace" "log" {
-  count               = length(data.azurerm_log_analytics_workspace.existing.*.id) == 0 ? 1 : 0
   name                = "demo-aks-logs"
-  location            = coalesce(azurerm_resource_group.rg[0].location, "East US")
-  resource_group_name = coalesce(azurerm_resource_group.rg[0].name, "demo-cicd-rg")
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
 }
 
 ##########################################################
-# AKS Cluster
+# SSH Key for AKS
 ##########################################################
 
 resource "tls_private_key" "ssh_key" {
@@ -77,11 +68,14 @@ resource "tls_private_key" "ssh_key" {
   rsa_bits  = 4096
 }
 
+##########################################################
+# AKS Cluster
+##########################################################
+
 resource "azurerm_kubernetes_cluster" "aks" {
-  count               = length(data.azurerm_kubernetes_cluster.existing.*.id) == 0 ? 1 : 0
   name                = "demo-aks-cluster"
-  location            = coalesce(azurerm_resource_group.rg[0].location, "East US")
-  resource_group_name = coalesce(azurerm_resource_group.rg[0].name, "demo-cicd-rg")
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
   dns_prefix          = "demoaks"
 
   default_node_pool {
@@ -96,13 +90,14 @@ resource "azurerm_kubernetes_cluster" "aks" {
 
   linux_profile {
     admin_username = "azureuser"
+
     ssh_key {
       key_data = tls_private_key.ssh_key.public_key_openssh
     }
   }
 
   oms_agent {
-    log_analytics_workspace_id = coalesce(azurerm_log_analytics_workspace.log[0].id, "")
+    log_analytics_workspace_id = azurerm_log_analytics_workspace.log.id
   }
 
   tags = {
@@ -115,22 +110,23 @@ resource "azurerm_kubernetes_cluster" "aks" {
 }
 
 ##########################################################
-# AKS Pull from ACR
+# Allow AKS to Pull from ACR
 ##########################################################
+
 resource "azurerm_role_assignment" "acr_pull" {
-  count                = length(data.azurerm_container_registry.existing.*.id) == 0 ? 0 : 1
-  principal_id         = azurerm_kubernetes_cluster.aks[0].kubelet_identity[0].object_id
+  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
   role_definition_name = "AcrPull"
-  scope                = coalesce(azurerm_container_registry.acr[0].id, data.azurerm_container_registry.existing.id)
+  scope                = azurerm_container_registry.acr.id
 }
 
 ##########################################################
 # Outputs
 ##########################################################
+
 output "acr_login_server" {
-  value = coalesce(azurerm_container_registry.acr[0].login_server, data.azurerm_container_registry.existing.login_server)
+  value = azurerm_container_registry.acr.login_server
 }
 
 output "aks_name" {
-  value = coalesce(azurerm_kubernetes_cluster.aks[0].name, data.azurerm_kubernetes_cluster.existing.name)
+  value = azurerm_kubernetes_cluster.aks.name
 }
