@@ -27,8 +27,29 @@ resource "azurerm_resource_group" "rg" {
     prevent_destroy = true
   }
 
-  # Only create if the data source is not found
+  # Only create if the data source does not exist
   count = data.azurerm_resource_group.existing != null ? 0 : 1
+}
+
+
+resource "azurerm_resource_group" "rg" {
+  name     = "demo-cicd-rg"
+  location = "East US"
+}
+
+data "azurerm_container_registry" "existing" {
+  name                = "democicdregistry"
+  resource_group_name = "demo-cicd-rg"
+}
+
+data "azurerm_log_analytics_workspace" "existing" {
+  name                = "demo-aks-logs"
+  resource_group_name = "demo-cicd-rg"
+}
+
+data "azurerm_kubernetes_cluster" "existing" {
+  name                = "demo-aks-cluster"
+  resource_group_name = "demo-cicd-rg"
 }
 
 resource "azurerm_container_registry" "acr" {
