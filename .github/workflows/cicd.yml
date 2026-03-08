@@ -12,6 +12,10 @@ env:
 
 jobs:
 
+# ---------------------------------
+# BUILD + TEST
+# ---------------------------------
+
   build-test:
     runs-on: ubuntu-latest
 
@@ -33,6 +37,10 @@ jobs:
       run: |
         pytest
 
+
+# ---------------------------------
+#  TERRAFORM INFRASTRUCTURE
+# ---------------------------------
 
   terraform-deploy:
 
@@ -61,23 +69,12 @@ jobs:
     - name: Terraform Init
       run: |
         cd terraform
-        terraform init
+        terraform init -upgrade
 
-    - name: Import existing Azure resources
+    - name: Terraform Validate
       run: |
         cd terraform
-
-        terraform import azurerm_resource_group.rg \
-        /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg || true
-
-        terraform import azurerm_container_registry.acr \
-        /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg/providers/Microsoft.ContainerRegistry/registries/democicdregistry || true
-
-        terraform import azurerm_log_analytics_workspace.log \
-        /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg/providers/Microsoft.OperationalInsights/workspaces/demo-aks-logs || true
-
-        terraform import azurerm_kubernetes_cluster.aks \
-        /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg/providers/Microsoft.ContainerService/managedClusters/demo-aks-cluster || true
+        terraform validate
 
     - name: Terraform Plan
       run: |
@@ -89,6 +86,10 @@ jobs:
         cd terraform
         terraform apply -auto-approve
 
+
+# ---------------------------------
+# BUILD + PUSH DOCKER IMAGE
+# ---------------------------------
 
   docker-build:
 
@@ -111,53 +112,29 @@ jobs:
             "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
           }
 
- # Install kubectl
-    - name: Install kubectl
-      uses: azure/setup-kubectl@v3
-
-    # Install Helm
-    - name: Install Helm
-      run: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-        helm version
-
-    # Add Prometheus Helm repo
-    - name: Add Prometheus Repo
-      run: |
-        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-        helm repo update
-
-    # Install Monitoring Stack
-    - name: Install Prometheus & Grafana
-      run: |
-        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-        --namespace monitoring \
-        --create-namespace
-
-
-    # Login to ACR
     - name: Login to ACR
       run: |
         az acr login --name $ACR_NAME
 
-    # Build Docker Image
     - name: Build Docker Image
       run: |
         docker build -t $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }} .
 
-    # Security Scan
-    - name: Scan Image
+    - name: Security Scan
       uses: aquasecurity/trivy-action@master
       with:
         image-ref: ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
         format: table
         exit-code: 0
 
-    # Push Image to ACR
-    - name: Push Image
+    - name: Push Image to ACR
       run: |
         docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}
 
+
+# ---------------------------------
+# DEPLOY APPLICATION + MONITORING
+# ---------------------------------
 
   deploy-aks:
 
@@ -165,6 +142,9 @@ jobs:
     needs: docker-build
 
     steps:
+
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
     - name: Azure Login
       uses: azure/login@v1
@@ -177,7 +157,14 @@ jobs:
             "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
           }
 
-    # Connect to AKS
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+
+    - name: Install Helm
+      run: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        helm version
+
     - name: Get AKS Credentials
       run: |
         az aks get-credentials \
@@ -185,16 +172,25 @@ jobs:
         --name $AKS_NAME \
         --overwrite-existing
 
-    # Deploy Kubernetes workload
+    - name: Deploy Application
+      run: |
+        kubectl apply -f ./k8s/deployment.yml
 
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - name: Install Prometheus & Grafana
+      run: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo update
 
-    - name: Deploy to AKS
-      run: kubectl apply -f ./k8s/deployment.yml
+        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+        --namespace monitoring \
+        --create-namespace
 
-
-          # Show Monitoring Status
     - name: Verify Monitoring
       run: |
         kubectl get pods -n monitoring
+
+    - name: Get Grafana Admin Password
+      run: |
+        kubectl get secret monitoring-grafana \
+        -n monitoring \
+        -o jsonpath="{.data.admin-password}" | base64 --decode
