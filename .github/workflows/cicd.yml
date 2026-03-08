@@ -111,6 +111,30 @@ jobs:
             "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
           }
 
+ # Install kubectl
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+
+    # Install Helm
+    - name: Install Helm
+      run: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        helm version
+
+    # Add Prometheus Helm repo
+    - name: Add Prometheus Repo
+      run: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo update
+
+    # Install Monitoring Stack
+    - name: Install Prometheus & Grafana
+      run: |
+        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+        --namespace monitoring \
+        --create-namespace
+
+
     # Login to ACR
     - name: Login to ACR
       run: |
@@ -168,3 +192,9 @@ jobs:
 
     - name: Deploy to AKS
       run: kubectl apply -f ./k8s/deployment.yml
+
+
+          # Show Monitoring Status
+    - name: Verify Monitoring
+      run: |
+        kubectl get pods -n monitoring
