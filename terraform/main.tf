@@ -22,6 +22,13 @@ provider "azurerm" {
 resource "azurerm_resource_group" "rg" {
   name     = "demo-cicd-rg"
   location = "East US"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  # Only create if the data source is not found
+  count = data.azurerm_resource_group.existing != null ? 0 : 1
 }
 
 resource "azurerm_container_registry" "acr" {
@@ -30,6 +37,8 @@ resource "azurerm_container_registry" "acr" {
   location            = azurerm_resource_group.rg.location
   sku                 = "Basic"
   admin_enabled       = true
+
+  count = data.azurerm_container_registry.existing != null ? 0 : 1
 }
 
 
@@ -42,6 +51,8 @@ resource "azurerm_log_analytics_workspace" "log" {
   resource_group_name = azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
+
+  count = data.azurerm_log_analytics_workspace.existing != null ? 0 : 1
 }
 
 #################################
@@ -84,6 +95,13 @@ resource "azurerm_kubernetes_cluster" "aks" {
   tags = {
     environment = "demo"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  count = data.azurerm_kubernetes_cluster.existing != null ? 0 : 1
+
 }
 
 #################################
