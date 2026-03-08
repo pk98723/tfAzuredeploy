@@ -162,6 +162,9 @@ jobs:
         --overwrite-existing
 
     # Deploy Kubernetes workload
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Deploy to AKS
-      run: |
-        kubectl apply -f ./k8s/deployment.yml
+      run: kubectl apply -f ./k8s/deployment.yml
