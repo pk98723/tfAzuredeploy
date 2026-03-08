@@ -164,4 +164,4 @@ jobs:
     # Deploy Kubernetes workload
     - name: Deploy to AKS
       run: |
-        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f ./k8s/deployment.yml
