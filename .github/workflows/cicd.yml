@@ -15,182 +15,161 @@ jobs:
 # ---------------------------------
 # BUILD + TEST
 # ---------------------------------
-
   build-test:
     runs-on: ubuntu-latest
-
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
+      - name: Install Dependencies
+        run: pip install flask pytest
 
-    - name: Install Dependencies
-      run: |
-        pip install flask pytest
-
-    - name: Run Tests
-      run: |
-        pytest
-
+      - name: Run Tests
+        run: pytest
 
 # ---------------------------------
-#  TERRAFORM INFRASTRUCTURE
+# TERRAFORM INFRASTRUCTURE
 # ---------------------------------
-
   terraform-deploy:
-
     runs-on: ubuntu-latest
     needs: build-test
-
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
 
-    - name: Azure Login
-      uses: azure/login@v1
-      with:
-        creds: |
-          {
-            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
-            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
-          }
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init -upgrade
 
-    - name: Terraform Init
-      run: |
-        cd terraform
-        terraform init -upgrade
+      - name: Terraform Validate
+        run: |
+          cd terraform
+          terraform validate
 
-    - name: Terraform Validate
-      run: |
-        cd terraform
-        terraform validate
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          terraform plan
 
-    - name: Terraform Plan
-      run: |
-        cd terraform
-        terraform plan
-
-    - name: Terraform Apply
-      run: |
-        cd terraform
-        terraform apply -auto-approve
-
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve
 
 # ---------------------------------
 # BUILD + PUSH DOCKER IMAGE
 # ---------------------------------
-
   docker-build:
-
     runs-on: ubuntu-latest
     needs: terraform-deploy
-
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
 
-    - name: Azure Login
-      uses: azure/login@v1
-      with:
-        creds: |
-          {
-            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
-            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
-          }
+      - name: Login to ACR
+        run: az acr login --name $ACR_NAME
 
-    - name: Login to ACR
-      run: |
-        az acr login --name $ACR_NAME
+      - name: Build Docker Image
+        run: docker build -t $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }} .
 
-    - name: Build Docker Image
-      run: |
-        docker build -t $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }} .
+      - name: Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          exit-code: 0
 
-    - name: Security Scan
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        format: table
-        exit-code: 0
-
-    - name: Push Image to ACR
-      run: |
-        docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}
-
+      - name: Push Image
+        run: docker push $ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}
 
 # ---------------------------------
 # DEPLOY APPLICATION + MONITORING
 # ---------------------------------
-
   deploy-aks:
-
     runs-on: ubuntu-latest
     needs: docker-build
-
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
 
-    - name: Azure Login
-      uses: azure/login@v1
-      with:
-        creds: |
-          {
-            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
-            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
-          }
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
 
-    - name: Install kubectl
-      uses: azure/setup-kubectl@v3
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm version
 
-    - name: Install Helm
-      run: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-        helm version
+      - name: Get AKS Credentials
+        run: |
+          az aks get-credentials \
+            --resource-group $RG_NAME \
+            --name $AKS_NAME \
+            --overwrite-existing
 
-    - name: Get AKS Credentials
-      run: |
-        az aks get-credentials \
-        --resource-group $RG_NAME \
-        --name $AKS_NAME \
-        --overwrite-existing
+      - name: Deploy Application
+        run: kubectl apply -f ./k8s/deployment.yml
 
-    - name: Deploy Application
-      run: |
-        kubectl apply -f ./k8s/deployment.yml
+      - name: Install Prometheus & Grafana
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace
 
-    - name: Install Prometheus & Grafana
-      run: |
-        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-        helm repo update
+      - name: Verify Monitoring
+        run: kubectl get pods -n monitoring
 
-        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-        --namespace monitoring \
-        --create-namespace
+      - name: Get Grafana Admin Password
+        run: |
+          kubectl get secret monitoring-grafana \
+            -n monitoring \
+            -o jsonpath="{.data.admin-password}" | base64 --decode
 
-    - name: Verify Monitoring
-      run: |
-        kubectl get pods -n monitoring
-
-    - name: Get Grafana Admin Password
-      run: |
-        kubectl get secret monitoring-grafana \
-        -n monitoring \
-        -o jsonpath="{.data.admin-password}" | base64 --decode
+      - name: Port-forward Grafana (optional)
+        run: |
+          kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80 &
+          echo "Grafana is available at http://localhost:3000"

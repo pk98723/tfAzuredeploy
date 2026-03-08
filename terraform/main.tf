@@ -23,14 +23,16 @@ provider "azurerm" {
 }
 
 # -------------------------
-# Resource Group (check existing)
+# Resource Group (incremental)
 # -------------------------
 data "azurerm_resource_group" "existing" {
   name = "demo-cicd-rg"
+  # This will fail if RG doesn't exist, but it's only used for ACR/log analytics
+  # AKS resource does not depend on this data
+  # So it's safe
 }
 
 resource "azurerm_resource_group" "rg" {
-  count    = data.azurerm_resource_group.existing != null ? 0 : 1
   name     = "demo-cicd-rg"
   location = "East US"
 
@@ -50,8 +52,8 @@ data "azurerm_container_registry" "existing" {
 resource "azurerm_container_registry" "acr" {
   count               = data.azurerm_container_registry.existing != null ? 0 : 1
   name                = "democicdregistry"
-  resource_group_name = coalesce(data.azurerm_resource_group.existing.name, azurerm_resource_group.rg[0].name)
-  location            = "East US"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
   sku                 = "Basic"
   admin_enabled       = true
 }
@@ -67,8 +69,8 @@ data "azurerm_log_analytics_workspace" "existing" {
 resource "azurerm_log_analytics_workspace" "log" {
   count               = data.azurerm_log_analytics_workspace.existing != null ? 0 : 1
   name                = "demo-aks-logs"
-  location            = "East US"
-  resource_group_name = coalesce(data.azurerm_resource_group.existing.name, azurerm_resource_group.rg[0].name)
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
 }
@@ -81,16 +83,10 @@ resource "tls_private_key" "ssh_key" {
   rsa_bits  = 4096
 }
 
-data "azurerm_kubernetes_cluster" "existing" {
-  name                = "demo-aks-cluster"
-  resource_group_name = "demo-cicd-rg"
-}
-
 resource "azurerm_kubernetes_cluster" "aks" {
-  count               = data.azurerm_kubernetes_cluster.existing != null ? 0 : 1
   name                = "demo-aks-cluster"
-  location            = "East US"
-  resource_group_name = coalesce(data.azurerm_resource_group.existing.name, azurerm_resource_group.rg[0].name)
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
   dns_prefix          = "demoaks"
 
   default_node_pool {
@@ -111,7 +107,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   oms_agent {
-    log_analytics_workspace_id = coalesce(data.azurerm_log_analytics_workspace.existing.id, azurerm_log_analytics_workspace.log[0].id)
+    log_analytics_workspace_id = length(azurerm_log_analytics_workspace.log) > 0 ? azurerm_log_analytics_workspace.log[0].id : data.azurerm_log_analytics_workspace.existing.id
   }
 
   tags = {
@@ -127,20 +123,20 @@ resource "azurerm_kubernetes_cluster" "aks" {
 # Allow AKS to Pull from ACR
 # -------------------------
 resource "azurerm_role_assignment" "acr_pull" {
-  depends_on = [azurerm_kubernetes_cluster.aks, azurerm_container_registry.acr]
+  depends_on = [azurerm_kubernetes_cluster.aks]
 
-  principal_id         = azurerm_kubernetes_cluster.aks[0].kubelet_identity[0].object_id
+  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
   role_definition_name = "AcrPull"
-  scope                = azurerm_container_registry.acr[0].id
+  scope                = length(azurerm_container_registry.acr) > 0 ? azurerm_container_registry.acr[0].id : data.azurerm_container_registry.existing.id
 }
 
 # -------------------------
 # Outputs
 # -------------------------
 output "acr_login_server" {
-  value = azurerm_container_registry.acr[0].login_server
+  value = length(azurerm_container_registry.acr) > 0 ? azurerm_container_registry.acr[0].login_server : data.azurerm_container_registry.existing.login_server
 }
 
 output "aks_name" {
-  value = azurerm_kubernetes_cluster.aks[0].name
+  value = azurerm_kubernetes_cluster.aks.name
 }
