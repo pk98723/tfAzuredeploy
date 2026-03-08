@@ -36,7 +36,7 @@ jobs:
         run: |
           terraform import azurerm_container_registry.acr /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg/providers/Microsoft.ContainerRegistry/registries/democicdregistry || true
           terraform import azurerm_log_analytics_workspace.log /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg/providers/Microsoft.OperationalInsights/workspaces/demo-aks-logs || true
-          terraform import azurerm_kubernetes_cluster.aks /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/demo-cicd-rg/providers/Microsoft.ContainerService/managedClusters/demo-aks-cluster || true
+          
 
       - name: Terraform Plan (Verify Imports)
         run: terraform plan
